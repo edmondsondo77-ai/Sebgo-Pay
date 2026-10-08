@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 
 class TabTerminalWidget extends StatelessWidget {
@@ -23,17 +22,18 @@ class TabTerminalWidget extends StatelessWidget {
     required this.onSendMoneyP2P,
   });
 
+  static const Color _kAlipayDeepBlue = Color(0xFF0061FF);
+  static final RegExp _thousandsRegExp = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+
+  String _formatDisplay(String amt) {
+    if (amt == "0" || amt.isEmpty) return "0";
+    return amt.replaceAllMapped(_thousandsRegExp, (Match m) => '${m[1]} ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final double parsedAmount = double.tryParse(amount) ?? 0.0;
     final bool isActionEnabled = parsedAmount > 0;
-    const Color kAlipayDeepBlue = Color(0xFF0061FF);
-
-    String formatDisplay(String amt) {
-      if (amt == "0" || amt.isEmpty) return "0";
-      RegExp reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
-      return amt.replaceAllMapped(reg, (Match m) => '${m[1]} ');
-    }
 
     return Material(
       color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FA),
@@ -45,13 +45,13 @@ class TabTerminalWidget extends StatelessWidget {
             child: SingleChildScrollView(
               padding:
                   const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: SizedBox(
-                width: 360,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // En-tête du montant (le texte d'en-tête redondant a été supprimé)
+                    // En-tête du montant
                     Text(
                       "MONTANT DE LA TRANSACTION",
                       style: TextStyle(
@@ -74,7 +74,7 @@ class TabTerminalWidget extends StatelessWidget {
                           textBaseline: TextBaseline.alphabetic,
                           children: [
                             Text(
-                              formatDisplay(amount),
+                              _formatDisplay(amount),
                               style: TextStyle(
                                 fontSize: 34,
                                 fontWeight: FontWeight.bold,
@@ -89,7 +89,7 @@ class TabTerminalWidget extends StatelessWidget {
                               style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
-                                color: kAlipayDeepBlue,
+                                color: _kAlipayDeepBlue,
                               ),
                             ),
                           ],
@@ -97,7 +97,8 @@ class TabTerminalWidget extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    // Pavé numérique avec un gris très léger (style Alipay épuré)
+
+                    // Pavé numérique (Grille 3x4)
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
@@ -129,7 +130,7 @@ class TabTerminalWidget extends StatelessWidget {
                             onTap: () => onPressKey("X"),
                             color: isDark
                                 ? const Color(0xFF1E293B)
-                                : const Color(0xFFF1F3F5), // Gris très léger
+                                : const Color(0xFFF1F3F5),
                             child: Icon(
                               Icons.backspace_outlined,
                               color: isDark
@@ -145,7 +146,7 @@ class TabTerminalWidget extends StatelessWidget {
                           onTap: () => onPressKey(currentKey),
                           color: isDark
                               ? const Color(0xFF1E293B)
-                              : const Color(0xFFF1F3F5), // Gris très léger
+                              : const Color(0xFFF1F3F5),
                           child: Text(
                             currentKey,
                             style: TextStyle(
@@ -160,64 +161,27 @@ class TabTerminalWidget extends StatelessWidget {
                       },
                     ),
                     const SizedBox(height: 12),
+
                     // Boutons d'actions principaux
                     Column(
                       children: [
                         Row(
                           children: [
                             Expanded(
-                              child: SizedBox(
-                                height: 42,
-                                child: OutlinedButton.icon(
-                                  icon: const Icon(Icons.qr_code_scanner,
-                                      size: 16),
-                                  label: const Text(
-                                    "Scanner",
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: isDark
-                                        ? Colors.white70
-                                        : kAlipayDeepBlue,
-                                    side: BorderSide(
-                                      color: isDark
-                                          ? Colors.white24
-                                          : Colors.grey.shade300,
-                                      width: 1.2,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                  onPressed: isActionEnabled ? onScanQr : null,
-                                ),
+                              child: _buildActionButton(
+                                label: "Scanner",
+                                icon: Icons.qr_code_scanner,
+                                isPrimary: false,
+                                onPressed: isActionEnabled ? onScanQr : null,
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: SizedBox(
-                                height: 42,
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.qr_code, size: 16),
-                                  label: const Text(
-                                    "Mon QR",
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: kAlipayDeepBlue,
-                                    foregroundColor: Colors.white,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                  onPressed:
-                                      isActionEnabled ? onShowMyQr : null,
-                                ),
+                              child: _buildActionButton(
+                                label: "Mon QR",
+                                icon: Icons.qr_code,
+                                isPrimary: true,
+                                onPressed: isActionEnabled ? onShowMyQr : null,
                               ),
                             ),
                           ],
@@ -226,66 +190,22 @@ class TabTerminalWidget extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: SizedBox(
-                                height: 42,
-                                child: OutlinedButton.icon(
-                                  icon: const Icon(Icons.share_outlined,
-                                      size: 16),
-                                  label: const Text(
-                                    "Partager",
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: isDark
-                                        ? Colors.white70
-                                        : kAlipayDeepBlue,
-                                    side: BorderSide(
-                                      color: isDark
-                                          ? Colors.white24
-                                          : Colors.grey.shade300,
-                                      width: 1.2,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                  onPressed:
-                                      isActionEnabled ? onShareInvoice : null,
-                                ),
+                              child: _buildActionButton(
+                                label: "Partager",
+                                icon: Icons.share_outlined,
+                                isPrimary: false,
+                                onPressed:
+                                    isActionEnabled ? onShareInvoice : null,
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: SizedBox(
-                                height: 42,
-                                child: OutlinedButton.icon(
-                                  icon:
-                                      const Icon(Icons.send_rounded, size: 16),
-                                  label: const Text(
-                                    "Envoi d'argent",
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: isDark
-                                        ? Colors.white70
-                                        : kAlipayDeepBlue,
-                                    side: BorderSide(
-                                      color: isDark
-                                          ? Colors.white24
-                                          : Colors.grey.shade300,
-                                      width: 1.2,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                  onPressed:
-                                      isActionEnabled ? onSendMoneyP2P : null,
-                                ),
+                              child: _buildActionButton(
+                                label: "Envoi d'argent",
+                                icon: Icons.send_rounded,
+                                isPrimary: false,
+                                onPressed:
+                                    isActionEnabled ? onSendMoneyP2P : null,
                               ),
                             ),
                           ],
@@ -308,24 +228,67 @@ class TabTerminalWidget extends StatelessWidget {
     required Widget child,
   }) {
     return Material(
-      color: Colors.transparent,
+      color: color,
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: Container(
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.02),
-                blurRadius: 2,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Center(child: child),
+        child: Center(child: child),
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required String label,
+    required IconData icon,
+    required bool isPrimary,
+    required VoidCallback? onPressed,
+  }) {
+    final Widget buttonContent = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 16),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
         ),
+      ],
+    );
+
+    if (isPrimary) {
+      return SizedBox(
+        height: 42,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _kAlipayDeepBlue,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          onPressed: onPressed,
+          child: buttonContent,
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 42,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: isDark ? Colors.white70 : _kAlipayDeepBlue,
+          side: BorderSide(
+            color: isDark ? Colors.white24 : Colors.grey.shade300,
+            width: 1.2,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        onPressed: onPressed,
+        child: buttonContent,
       ),
     );
   }

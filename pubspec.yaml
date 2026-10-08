@@ -52,6 +52,7 @@ dependencies:
   qr_flutter: ^4.1.0 # ou la version compatible : button 'Mon QR'
   mobile_scanner: ^5.2.3 # ou la version compatible : button 'scanner'
   flutter_contacts: ^1.1.9 # sélectionner un destinataire directement depuis le répertoire du téléphone
+  webview_flutter_android: ^4.14.1
 
 
 dev_dependencies:

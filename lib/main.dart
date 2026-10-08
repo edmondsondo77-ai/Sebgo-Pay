@@ -1,50 +1,48 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sebgo_pay/features/terminal/presentation/merchant_terminal_controller.dart';
+import 'package:sebgo_pay/features/escrow/presentation/escrow_payment_screen.dart';
+import 'package:sebgo_pay/features/auth/presentation/screens/merchant_onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  usePathUrlStrategy();
 
-  // Initialisation de Supabase avec vos clés officielles
   await Supabase.initialize(
     url: 'https://ectruwhkrwnnzmpnyiue.supabase.co',
     anonKey: 'sb_publishable_F1-nihDsVcCYFLfPcjImog_zXldZjew',
   );
 
-  runApp(const SebGoApp());
+  final prefs = await SharedPreferences.getInstance();
+  final bool isDark = prefs.getBool("sebgo_dark_mode") ?? false;
+  runApp(SebGoApp(initialThemeMode: isDark ? ThemeMode.dark : ThemeMode.light));
 }
 
 class SebGoApp extends StatefulWidget {
-  const SebGoApp({super.key});
+  final ThemeMode initialThemeMode;
+  const SebGoApp({super.key, required this.initialThemeMode});
 
   @override
   State<SebGoApp> createState() => _SebGoAppState();
 }
 
 class _SebGoAppState extends State<SebGoApp> {
-  ThemeMode _themeMode = ThemeMode.light;
+  late ThemeMode _themeMode;
 
   @override
   void initState() {
     super.initState();
-    _loadTheme();
-  }
-
-  void _loadTheme() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _themeMode = (prefs.getBool("sebgo_dark_mode") ?? false)
-          ? ThemeMode.dark
-          : ThemeMode.light;
-    });
+    _themeMode = widget.initialThemeMode;
   }
 
   void toggleTheme(ThemeMode mode) async {
     final prefs = await SharedPreferences.getInstance();
     final bool isDark = mode == ThemeMode.dark;
     await prefs.setBool("sebgo_dark_mode", isDark);
+    if (!mounted) return;
     setState(() {
       _themeMode = mode;
     });
@@ -52,36 +50,94 @@ class _SebGoAppState extends State<SebGoApp> {
 
   @override
   Widget build(BuildContext context) {
+    final initialUri = Uri.base;
+    final segments =
+        initialUri.pathSegments.where((s) => s.isNotEmpty).toList();
+    List<String> hashSegments = [];
+    if (initialUri.fragment.isNotEmpty) {
+      hashSegments = Uri.parse(initialUri.fragment)
+          .pathSegments
+          .where((s) => s.isNotEmpty)
+          .toList();
+    }
+    final bool isPaymentRoute =
+        (segments.isNotEmpty && segments.first == 'pay') ||
+            (hashSegments.isNotEmpty && hashSegments.first == 'pay');
+    final String tokenFromUrl = isPaymentRoute
+        ? (segments.isNotEmpty && segments.first == 'pay' && segments.length > 1
+            ? segments[1]
+            : (hashSegments.length > 1 ? hashSegments[1] : ''))
+        : '';
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Sebgo Pay',
+      title: 'SebGo Pay',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue, // Teinte Alipay / Professionnelle
-          brightness: Brightness.light,
-        ),
+            seedColor: const Color(0xFF0061FF), brightness: Brightness.light),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: Colors.black,
+            seedColor: const Color(0xFF0061FF), brightness: Brightness.dark),
+        scaffoldBackgroundColor: const Color(0xFF0F172A),
         useMaterial3: true,
       ),
       themeMode: _themeMode,
+      onGenerateRoute: (settings) {
+        final rawName = settings.name ?? '';
+        final Uri uri = Uri.parse(rawName);
+        final routeSegments =
+            uri.pathSegments.where((s) => s.isNotEmpty).toList();
+        List<String> uriHashSegments = [];
+        if (uri.fragment.isNotEmpty) {
+          uriHashSegments = Uri.parse(uri.fragment)
+              .pathSegments
+              .where((s) => s.isNotEmpty)
+              .toList();
+        }
+        if ((routeSegments.isNotEmpty && routeSegments.first == 'pay') ||
+            (uriHashSegments.isNotEmpty && uriHashSegments.first == 'pay')) {
+          final String extractedToken = routeSegments.isNotEmpty &&
+                  routeSegments.first == 'pay' &&
+                  routeSegments.length > 1
+              ? routeSegments[1].trim()
+              : (uriHashSegments.length > 1 ? uriHashSegments[1].trim() : '');
+          if (extractedToken.isNotEmpty) {
+            return MaterialPageRoute(
+              builder: (_) => EscrowPaymentScreen(paymentToken: extractedToken),
+              settings: settings,
+            );
+          }
+        }
+        return null;
+      },
       builder: (context, child) {
-        return Material(
-          child: MediaQuery(
-            data: MediaQuery.of(context).copyWith(
-              textScaler: const TextScaler.linear(1.0),
-            ),
-            child: child ?? const SizedBox.shrink(),
-          ),
+        return MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.0)),
+          child: child ?? const SizedBox.shrink(),
         );
       },
-      home: PinLockScreen(onThemeChanged: toggleTheme, currentMode: _themeMode),
+      home: tokenFromUrl.isNotEmpty
+          ? EscrowPaymentScreen(paymentToken: tokenFromUrl)
+          : StreamBuilder<AuthState>(
+              stream: Supabase.instance.client.auth.onAuthStateChange,
+              builder: (context, snapshot) {
+                final session = Supabase.instance.client.auth.currentSession;
+
+                // Si non connecté -> Écran d'onboarding / inscription
+                if (session == null) {
+                  return const MerchantOnboardingScreen();
+                }
+
+                // Si connecté -> Écran de verrouillage PIN / biométrie existant[cite: 9]
+                return PinLockScreen(
+                  onThemeChanged: toggleTheme,
+                  currentMode: _themeMode,
+                );
+              },
+            ),
     );
   }
 }
@@ -89,13 +145,11 @@ class _SebGoAppState extends State<SebGoApp> {
 class PinLockScreen extends StatefulWidget {
   final Function(ThemeMode) onThemeChanged;
   final ThemeMode currentMode;
-
   const PinLockScreen({
     super.key,
     required this.onThemeChanged,
     required this.currentMode,
   });
-
   @override
   State<PinLockScreen> createState() => _PinLockScreenState();
 }
@@ -109,19 +163,20 @@ class _PinLockScreenState extends State<PinLockScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _bio();
+      _authenticateBiometrics();
     });
   }
 
-  Future<void> _bio() async {
+  Future<void> _authenticateBiometrics() async {
     if (_isAuthenticating) return;
     try {
+      if (!mounted) return;
       setState(() => _isAuthenticating = true);
       bool canCheck =
           await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
       if (canCheck) {
         bool authenticated = await _auth.authenticate(
-          localizedReason: 'Authentification requise pour ouvrir SebGo',
+          localizedReason: 'Authentification requise pour ouvrir SebGo Pay',
           options: const AuthenticationOptions(
             biometricOnly: false,
             stickyAuth: true,
@@ -129,7 +184,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
           ),
         );
         if (authenticated && mounted) {
-          _enter();
+          _navigateToTerminal();
         }
       }
     } catch (e) {
@@ -141,7 +196,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
     }
   }
 
-  void _enter() {
+  void _navigateToTerminal() {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -159,9 +214,9 @@ class _PinLockScreenState extends State<PinLockScreen> {
     }
     if (_pin.length == 4) {
       if (_pin == "1234") {
-        _enter();
+        _navigateToTerminal();
       } else {
-        Future.delayed(const Duration(milliseconds: 200), () {
+        Future.delayed(const Duration(milliseconds: 250), () {
           if (mounted) setState(() => _pin = "");
         });
       }
@@ -170,11 +225,10 @@ class _PinLockScreenState extends State<PinLockScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark = widget.currentMode == ThemeMode.dark;
     return Scaffold(
-      backgroundColor: isDark
-          ? Colors.grey.shade900
-          : const Color(0xFF0061FF), // Bleu Alipay
+      backgroundColor:
+          isDark ? const Color(0xFF0F172A) : const Color(0xFF0061FF),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -247,7 +301,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
                       }
                       if (index == 11) {
                         return IconButton(
-                          onPressed: _bio,
+                          onPressed: _authenticateBiometrics,
                           icon: const Icon(
                             Icons.fingerprint,
                             color: Colors.white,

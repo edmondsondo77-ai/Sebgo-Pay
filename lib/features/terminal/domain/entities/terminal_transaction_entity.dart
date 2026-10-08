@@ -1,12 +1,15 @@
 import 'package:uuid/uuid.dart';
 
+/// Représente une action effectuée par le marchand sur son terminal SebGo Pay
 class TerminalTransactionEntity {
   final String id;
   final double amount;
   final String currency;
   final String actionType; // 'scanner', 'my_qr', 'share', 'p2p'
   final DateTime timestamp;
-  final String? recipientPhone; // 1. Ajout de la propriété pour le P2P
+  final String? recipientPhone;
+  final String?
+      paymentToken; // Lien vers le coffre-fort si actionType == 'share'
 
   TerminalTransactionEntity({
     String? id,
@@ -14,8 +17,7 @@ class TerminalTransactionEntity {
     required this.currency,
     required this.actionType,
     required this.timestamp,
-    this.recipientPhone, // 2. Ajout dans le constructeur optionnel
-  }) : id = id ??
-            const Uuid()
-                .v4(); // Génère automatiquement un UUID valide si aucun n'est fourni
+    this.recipientPhone,
+    this.paymentToken,
+  }) : id = id ?? const Uuid().v4();
 }

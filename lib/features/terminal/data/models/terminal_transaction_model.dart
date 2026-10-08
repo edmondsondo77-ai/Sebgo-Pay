@@ -2,11 +2,13 @@ import '../../domain/entities/terminal_transaction_entity.dart';
 
 class TerminalTransactionModel extends TerminalTransactionEntity {
   TerminalTransactionModel({
-    required super.id,
+    super.id,
     required super.amount,
     required super.currency,
     required super.actionType,
     required super.timestamp,
+    super.recipientPhone,
+    super.paymentToken,
   });
 
   /// Convertit le modèle en Map (JSON) pour l'insertion dans la table Supabase `transactions`.
@@ -16,12 +18,13 @@ class TerminalTransactionModel extends TerminalTransactionEntity {
       'amount': amount,
       'currency': currency,
       'action_type': actionType, // Correspond à la colonne SQL action_type
-      'created_at': timestamp
-          .toIso8601String(), // Convertit le DateTime Dart en format texte ISO 8601 pour Supabase
+      'created_at': timestamp.toIso8601String(),
+      if (recipientPhone != null) 'recipient_phone': recipientPhone,
+      if (paymentToken != null) 'payment_token': paymentToken,
     };
   }
 
-  /// Constructeur optionnel pour recréer le modèle à partir des données de Supabase (lecture)
+  /// Constructeur pour recréer le modèle à partir des données de Supabase (lecture)
   factory TerminalTransactionModel.fromMap(Map<String, dynamic> map) {
     return TerminalTransactionModel(
       id: map['id'] ?? '',
@@ -31,6 +34,8 @@ class TerminalTransactionModel extends TerminalTransactionEntity {
       timestamp: map['created_at'] != null
           ? DateTime.parse(map['created_at'])
           : DateTime.now(),
+      recipientPhone: map['recipient_phone'],
+      paymentToken: map['payment_token'],
     );
   }
 }

@@ -67,26 +67,29 @@ class _MerchantTerminalControllerState
     if (amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text("Veuillez saisir un montant valide supérieur à 0")),
+          content: Text("Veuillez saisir un montant valide supérieur à 0"),
+        ),
       );
       return;
     }
 
     try {
-      await _processActionUsecase.call(
+      // 1. Récupération dynamique du numéro du marchand connecté (ex: depuis la session Supabase Auth)
+      final merchantPhone =
+          Supabase.instance.client.auth.currentUser?.phone ?? '+22670000000';
+
+      // 2. Appel unique du UseCase qui gère l'enregistrement ET retourne le paymentToken si actionType == 'share'
+      final String? paymentToken = await _processActionUsecase.call(
         amount: amount,
         currency: 'XOF',
         actionType: actionType,
+        recipientPhone: merchantPhone,
       );
+
       if (!mounted) return;
 
-      String message = "";
       switch (actionType) {
         case 'my_qr':
-          message = "QR code de caisse généré pour $amount XOF";
-
-          // Affichage de la boîte de dialogue avec le QR code
-          if (!mounted) return;
           showDialog(
             context: context,
             builder: (BuildContext context) {
@@ -132,21 +135,21 @@ class _MerchantTerminalControllerState
               );
             },
           );
+          break;
+
         case 'scanner':
-          // Navigation vers l'écran de la caméra
           final scannedData = await Navigator.push<String>(
             context,
             MaterialPageRoute(
               builder: (_) => QrScannerScreen(amount: amount),
             ),
           );
-
           if (scannedData != null && mounted) {
-            // Traitement du code scanné du client
             await _processActionUsecase.call(
               amount: amount,
               currency: 'XOF',
               actionType: 'scanner_success',
+              recipientPhone: merchantPhone,
             );
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -159,44 +162,62 @@ class _MerchantTerminalControllerState
             });
           }
           break;
-
         case 'share':
-          // Génération d'une référence ou d'un lien unique de paiement sécurisé
-          final String paymentLink =
-              "https://pay.sebgo.com/pay?amount=$amount&currency=XOF";
-          final String message =
-              "Lien de paiement sécurisé SebGo Pay : $amount XOF.\nRéglez en toute sécurité ici : $paymentLink";
+          // 3. Utilisation du token retourné par le UseCase (plus d'appel direct à Supabase !)
+          if (paymentToken != null) {
+            // 1. URL de paiement
+            // En environnement de développement local (Web/PC) :
+            final String paymentLink =
+                "https://sebgo-pay.netlify.app/#/pay/$paymentToken";
+            //debut cmt final String paymentLink =
+            //fin cmt    "https://pay.sebgo.com/pay/$paymentToken";
 
-          // Appel du partage natif (WhatsApp, Messenger, SMS, etc.)
-          await Share.share(message,
-              subject: 'Paiement SebGo Pay - $amount XOF');
+            final String message =
+                " 🧾  *Facture & Paiement Sécurisé SebGo Pay*\n\n"
+                "Montant : $amount XOF\n"
+                "Coffre-fort Escrow : Validé et en attente  🔒 \n\n"
+                "Réglez en toute sécurité en cliquant sur ce lien unique :\n"
+                "$paymentLink\n\n"
+                "Merci pour votre confiance !  🇧🇫 ";
+
+            await Share.share(
+              message,
+              subject: 'Paiement Sécurisé SebGo Pay - $amount XOF',
+            );
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Lien de paiement Escrow partagé avec succès !"),
+                backgroundColor: Colors.green,
+              ),
+            );
+
+            setState(() {
+              _amountString = "0";
+            });
+          }
           break;
+
         case 'p2p':
-          // 1. Identification du destinataire (Saisie manuelle ou répertoire)
           final recipientPhoneInput = await Navigator.push<String>(
             context,
             MaterialPageRoute(
               builder: (_) => P2pRecipientScreen(amount: amount),
             ),
           );
-
           if (recipientPhoneInput == null ||
               recipientPhoneInput.isEmpty ||
               !mounted) {
             return;
           }
 
-          // 2. Normalisation et routage panafricain intelligent (avec le helper)
           final routingResult =
               normalizeAndRoutePhoneNumber(recipientPhoneInput);
-
-          // Masquage intelligent et propre (ex: +225 05 **** 14)
           final phoneDigits = routingResult.formattedPhone;
           final maskedRecipient = phoneDigits.length > 8
               ? '${phoneDigits.substring(0, 4)} ${phoneDigits.substring(4, 6)} **** ${phoneDigits.substring(phoneDigits.length - 2)}'
               : phoneDigits;
 
-          // 3. Affichage du récapitulatif ultra-professionnel avec Drapeau et Pays
           final bool? confirmed = await showDialog<bool>(
             context: context,
             builder: (BuildContext context) {
@@ -214,7 +235,6 @@ class _MerchantTerminalControllerState
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // En-tête Pays & Drapeau pour rassurer l'utilisateur
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 8),
@@ -283,17 +303,14 @@ class _MerchantTerminalControllerState
             },
           );
 
-          // 4. Validation finale et enregistrement dans la base de données Supabase
           if (confirmed == true && mounted) {
             await _processActionUsecase.call(
               amount: amount,
               currency: 'XOF',
               actionType: 'p2p_transfer',
-              recipientPhone: routingResult
-                  .formattedPhone, // On envoie le numéro normalisé définitif
+              recipientPhone: routingResult.formattedPhone,
             );
             if (!mounted) return;
-
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -301,21 +318,12 @@ class _MerchantTerminalControllerState
                 backgroundColor: Colors.green,
               ),
             );
-
             setState(() {
               _amountString = "0";
             });
           }
           break;
       }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.green),
-      );
-
-      setState(() {
-        _amountString = "0";
-      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
