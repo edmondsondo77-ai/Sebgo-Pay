@@ -1,0 +1,56 @@
+ allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// 1. Empêche Gradle de lancer sdkmanager.bat automatiquement
+options.compilerArgs << "-Xlint:unchecked"
+project.ext.set("android.injected.invoked.from.ide", "true")
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty("android")) {
+            android {
+                // Fix pour le namespace sous AGP 8+
+                if (namespace == null || namespace.isEmpty()) {
+                    namespace = project.group.toString() + "." + project.name
+                }
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+            }
+            
+            // 2. Nettoyage automatique du Manifest pour les plugins tiers
+            project.android.variantFilter { variant ->
+                project.tasks.create(name: "cleanManifestFor${variant.name.capitalize()}") {
+                    doLast {
+                        def manifestFile = file("${project.projectDir}/src/main/AndroidManifest.xml")
+                        if (manifestFile.exists()) {
+                            def contents = manifestFile.getText('UTF-8')
+                            if (contents.contains('package=')) {
+                                contents = contents.replaceAll(/package="[^"]*"/, '')
+                                manifestFile.write(contents, 'UTF-8')
+                            }
+                        }
+                    }
+                }
+                project.tasks.findByName("process${variant.name.capitalize()}Manifest")?.dependsOn("cleanManifestFor${variant.name.capitalize()}")
+            }
+        }
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

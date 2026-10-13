@@ -1,0 +1,50 @@
+ allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty("android")) {
+            android {
+                if (namespace == null || namespace.isEmpty()) {
+                    namespace = project.group.toString() + "." + project.name
+                }
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+            }
+            
+            project.android.variantFilter { variant ->
+                project.tasks.create(name: "cleanManifestFor${variant.name.capitalize()}") {
+                    doLast {
+                        def manifestFile = file("${project.projectDir}/src/main/AndroidManifest.xml")
+                        if (manifestFile.exists()) {
+                            def contents = manifestFile.getText('UTF-8')
+                            if (contents.contains('package=')) {
+                                contents = contents.replaceAll(/package="[^"]*"/, '')
+                                manifestFile.write(contents, 'UTF-8')
+                            }
+                        }
+                    }
+                }
+                project.tasks.findByName("process${variant.name.capitalize()}Manifest")?.dependsOn("cleanManifestFor${variant.name.capitalize()}")
+            }
+        }
+    }
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
