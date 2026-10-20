@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -70,7 +71,6 @@ class _SebGoAppState extends State<SebGoApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'SebGo Pay',
-      // Déclaration des routes nommées pour éviter les erreurs de navigation
       routes: {
         '/terminal': (context) => MerchantTerminalController(
               onThemeChanged: toggleTheme,
@@ -126,13 +126,28 @@ class _SebGoAppState extends State<SebGoApp> {
       },
       home: tokenFromUrl.isNotEmpty
           ? EscrowPaymentScreen(paymentToken: tokenFromUrl)
-          : StreamBuilder<AuthState>(
-              stream: Supabase.instance.client.auth.onAuthStateChange,
+          : FutureBuilder<bool>(
+              future: _checkValidMerchantSession(),
               builder: (context, snapshot) {
-                final session = Supabase.instance.client.auth.currentSession;
-                if (session == null) {
+                // Pendant la vérification du compte, affichage d'un loader fluide
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Scaffold(
+                    backgroundColor: const Color(0xFF0061FF),
+                    body: Center(
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                      ),
+                    ),
+                  );
+                }
+
+                // Si l'utilisateur n'a pas de session ou de compte valide -> Onboarding
+                final bool hasValidAccount = snapshot.data ?? false;
+                if (!hasValidAccount) {
                   return const MerchantOnboardingScreen();
                 }
+
+                // Si l'utilisateur a un compte valide -> Écran de verrouillage PIN/Biométrie
                 return PinLockScreen(
                   onThemeChanged: toggleTheme,
                   currentMode: _themeMode,
@@ -140,6 +155,27 @@ class _SebGoAppState extends State<SebGoApp> {
               },
             ),
     );
+  }
+
+  /// Vérifie rigoureusement si l'utilisateur possède une session ET un profil marchand valide
+  Future<bool> _checkValidMerchantSession() async {
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) return false;
+
+      final userId = session.user.id;
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('id')
+          .eq('id', userId)
+          .maybeSingle();
+
+      // Si la session existe mais qu'aucun profil correspondant n'existe en base
+      return profile != null;
+    } catch (e) {
+      debugPrint("Erreur lors de la vérification de session : $e");
+      return false;
+    }
   }
 }
 
@@ -151,6 +187,7 @@ class PinLockScreen extends StatefulWidget {
     required this.onThemeChanged,
     required this.currentMode,
   });
+
   @override
   State<PinLockScreen> createState() => _PinLockScreenState();
 }
@@ -164,11 +201,14 @@ class _PinLockScreenState extends State<PinLockScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _authenticateBiometrics();
+      if (!kIsWeb) {
+        _authenticateBiometrics();
+      }
     });
   }
 
   Future<void> _authenticateBiometrics() async {
+    if (kIsWeb) return; // Sécurité Web : pas de biométrie native navigateur
     if (_isAuthenticating) return;
     try {
       if (!mounted) return;
@@ -293,6 +333,9 @@ class _PinLockScreenState extends State<PinLockScreen> {
                         );
                       }
                       if (index == 11) {
+                        if (kIsWeb) {
+                          return const SizedBox.shrink();
+                        }
                         return IconButton(
                           onPressed: _authenticateBiometrics,
                           icon: const Icon(
@@ -323,6 +366,20 @@ class _PinLockScreenState extends State<PinLockScreen> {
                         ),
                       );
                     },
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Option de déconnexion pour réinitialiser le test et retourner à l'Onboarding
+                TextButton(
+                  onPressed: () async {
+                    await Supabase.instance.client.auth.signOut();
+                    if (context.mounted) {
+                      Navigator.pushReplacementNamed(context, '/');
+                    }
+                  },
+                  child: const Text(
+                    "Changer de compte / Se déconnecter",
+                    style: TextStyle(color: Colors.white60, fontSize: 13),
                   ),
                 ),
               ],

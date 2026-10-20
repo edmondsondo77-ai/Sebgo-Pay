@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sebgo_pay/features/terminal/domain/repositories/terminal_repository.dart';
 import 'package:sebgo_pay/features/terminal/data/repositories/terminal_repository_impl.dart';
+import 'package:sebgo_pay/features/terminal/data/datasources/paxity_remote_datasource.dart';
 import 'package:sebgo_pay/features/terminal/domain/usecase/process_terminal_action_usecase.dart';
 import 'package:sebgo_pay/features/terminal/presentation/qr_scanner_screen.dart';
 import 'package:sebgo_pay/features/terminal/presentation/p2p_recipient_screen.dart';
@@ -28,17 +29,28 @@ class MerchantTerminalController extends StatefulWidget {
 class _MerchantTerminalControllerState
     extends State<MerchantTerminalController> {
   String _amountString = "0";
+  bool _isLoading = false; // Drapeau anti-double clic[cite: 10]
   late final ProcessTerminalActionUsecase _processActionUsecase;
 
   @override
   void initState() {
     super.initState();
+    
     final TerminalRepository repository =
         TerminalRepositoryImpl(Supabase.instance.client);
-    _processActionUsecase = ProcessTerminalActionUsecase(repository);
+
+    // Initialisation du DataSource Paxity avec la clé API Sandbox
+ final paxityDataSource = PaxityRemoteDataSource(
+  supabaseClient: Supabase.instance.client,
+);
+    _processActionUsecase = ProcessTerminalActionUsecase(
+      repository: repository,
+      paxityRemoteDataSource: paxityDataSource,
+    );
   }
 
   void _onKeyPressed(String value) {
+    if (_isLoading) return;
     setState(() {
       if (value == "C") {
         _amountString = "0";
@@ -61,6 +73,7 @@ class _MerchantTerminalControllerState
   }
 
   Future<void> _handleAction(String actionType) async {
+    if (_isLoading) return; // Sécurité anti-double clic[cite: 10]
     final double amount = double.tryParse(_amountString) ?? 0.0;
     if (amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -71,18 +84,18 @@ class _MerchantTerminalControllerState
       return;
     }
 
+    setState(() => _isLoading = true);
+
     try {
-      // Appel du UseCase épuré (les tables transactions et escrow se basent désormais uniquement sur l'UUID du marchand)
-      final String? paymentToken = await _processActionUsecase.call(
-        amount: amount,
-        currency: 'XOF',
-        actionType: actionType,
-      );
-
-      if (!mounted) return;
-
       switch (actionType) {
         case 'my_qr':
+          final String? paymentToken = await _processActionUsecase.call(
+            amount: amount,
+            currency: 'XOF',
+            actionType: actionType,
+          );
+
+          if (!mounted) return;
           showDialog(
             context: context,
             builder: (BuildContext context) {
@@ -104,8 +117,7 @@ class _MerchantTerminalControllerState
                       width: 200,
                       height: 200,
                       child: QrImageView(
-                        data:
-                            'sebgo://pay?amount=$amount&currency=XOF&type=my_qr',
+                        data: 'sebgo://pay?amount=$amount&currency=XOF&type=my_qr&token=$paymentToken',
                         version: QrVersions.auto,
                         size: 200.0,
                         backgroundColor: Colors.white,
@@ -137,12 +149,15 @@ class _MerchantTerminalControllerState
               builder: (_) => QrScannerScreen(amount: amount),
             ),
           );
+
           if (scannedData != null && mounted) {
             await _processActionUsecase.call(
               amount: amount,
               currency: 'XOF',
               actionType: 'scanner_success',
             );
+
+            if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text("Paiement validé pour le code : $scannedData"),
@@ -156,23 +171,31 @@ class _MerchantTerminalControllerState
           break;
 
         case 'share':
-          if (paymentToken != null) {
-            final String paymentLink =
-                "https://sebgo-pay.netlify.app/#/pay/$paymentToken";
+          // Génération du lien de paiement Sandbox direct via Paxity
+          final String? paymentLink = await _processActionUsecase.call(
+            amount: amount,
+            currency: 'XOF',
+            actionType: actionType,
+          );
+
+          if (paymentLink != null && mounted) {
             final String message =
-                " 🧾  *Facture & Paiement Sécurisé SebGo Pay*\n\n"
+                "🧾 *Facture & Paiement Sécurisé SebGo Pay*\n\n"
                 "Montant : $amount XOF\n"
-                "Coffre-fort Escrow : Validé et en attente  🔒 \n\n"
-                "Réglez en toute sécurité en cliquant sur ce lien unique :\n"
+                "Coffre-fort Escrow : En attente de règlement🔒\n\n"
+                "Réglez en toute sécurité via notre guichet partagé :\n"
                 "$paymentLink\n\n"
-                "Merci pour votre confiance !  🇧🇫 ";
+                "Merci pour votre confiance ! 🇧🇫";
+
             await Share.share(
               message,
               subject: 'Paiement Sécurisé SebGo Pay - $amount XOF',
             );
+
+            if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text("Lien de paiement Escrow partagé avec succès !"),
+                content: Text("Lien de paiement Paxity Sandbox partagé avec succès !"),
                 backgroundColor: Colors.green,
               ),
             );
@@ -189,11 +212,13 @@ class _MerchantTerminalControllerState
               builder: (_) => P2pRecipientScreen(amount: amount),
             ),
           );
+
           if (recipientPhoneInput == null ||
               recipientPhoneInput.isEmpty ||
               !mounted) {
             return;
           }
+
           final routingResult =
               normalizeAndRoutePhoneNumber(recipientPhoneInput);
 
@@ -203,6 +228,7 @@ class _MerchantTerminalControllerState
               currency: 'XOF',
               actionType: 'p2p_transfer',
             );
+
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -222,6 +248,10 @@ class _MerchantTerminalControllerState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erreur : $e"), backgroundColor: Colors.red),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
